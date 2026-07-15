@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>US Economic Recovery Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #14213d;
+        --muted: #64748b;
+        --line: #dfe7ef;
+        --paper: #ffffff;
+        --canvas: #f3f6f9;
+        --accent: #2456a6;
+        --positive: #087a63;
+        --negative: #b33a50;
+        --shadow: 0 14px 34px rgba(32, 50, 76, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      .page {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 52px 0 34px;
+      }
+
+      header { margin-bottom: 28px; }
+
+      .eyebrow {
+        margin: 0 0 9px;
+        color: var(--accent);
+        font-size: 0.75rem;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 780px;
+        margin: 0;
+        font-size: clamp(2rem, 5vw, 3.7rem);
+        font-weight: 760;
+        letter-spacing: -0.045em;
+        line-height: 1.02;
+      }
+
+      .subtitle {
+        max-width: 670px;
+        margin: 14px 0 0;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.6;
+      }
+
+      .status {
+        display: none;
+        margin-bottom: 22px;
+        padding: 14px 16px;
+        border: 1px solid #efb9c3;
+        border-radius: 12px;
+        background: #fff4f6;
+        color: #8d2035;
+        line-height: 1.5;
+      }
+
+      .status.visible { display: block; }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--paper);
+        box-shadow: var(--shadow);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(230px, 0.75fr) minmax(0, 2fr);
+        gap: 22px;
+        padding: 26px;
+      }
+
+      .index-summary {
+        display: flex;
+        min-height: 320px;
+        flex-direction: column;
+        justify-content: center;
+        padding: 14px 10px 14px 8px;
+      }
+
+      .section-label,
+      .card-category {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .index-value {
+        margin: 5px 0 0;
+        font-size: clamp(4.4rem, 9vw, 7rem);
+        font-variant-numeric: tabular-nums;
+        font-weight: 760;
+        letter-spacing: -0.065em;
+        line-height: 1;
+      }
+
+      .index-date {
+        margin: 8px 0 18px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .trend {
+        align-self: flex-start;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: #e8f6f2;
+        color: var(--positive);
+        font-size: 0.82rem;
+        font-weight: 750;
+      }
+
+      .trend.declining { background: #fff0f2; color: var(--negative); }
+      .trend.stable,
+      .trend.unavailable { background: #eef2f6; color: #536274; }
+
+      .trend-note {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 0.74rem;
+        line-height: 1.4;
+      }
+
+      .chart-wrap { position: relative; min-height: 320px; }
+
+      .section-heading {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 20px;
+        margin: 38px 0 16px;
+      }
+
+      h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.025em; }
+
+      .section-heading p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .indicator-card { padding: 21px; }
+
+      .card-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .series-id {
+        padding: 5px 7px;
+        border-radius: 7px;
+        background: #edf2f7;
+        color: #536274;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.72rem;
+        font-weight: 700;
+      }
+
+      h3 { margin: 5px 0 0; font-size: 1.08rem; }
+
+      .metric-row {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 22px 0 16px;
+      }
+
+      .metric-value {
+        margin: 0;
+        font-size: 2rem;
+        font-variant-numeric: tabular-nums;
+        font-weight: 740;
+        letter-spacing: -0.04em;
+      }
+
+      .metric-meta,
+      .baseline-ratio span {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+
+      .baseline-ratio { text-align: right; }
+      .baseline-ratio strong { display: block; font-size: 1rem; }
+      .small-chart { position: relative; height: 150px; }
+
+      .method-note {
+        margin: 20px 0 0;
+        padding: 18px 20px;
+        border-left: 3px solid var(--accent);
+        background: #eaf0f8;
+        color: #44556a;
+        font-size: 0.85rem;
+        line-height: 1.55;
+      }
+
+      footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        margin-top: 24px;
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+
+      footer a { color: var(--accent); }
+
+      @media (max-width: 780px) {
+        .page { padding-top: 34px; }
+        .hero { grid-template-columns: 1fr; }
+        .index-summary { min-height: auto; }
+        .cards { grid-template-columns: 1fr; }
+        .section-heading,
+        footer { align-items: flex-start; flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <p class="eyebrow">United States · Recovery monitor</p>
+        <h1>Economic Recovery Dashboard</h1>
+        <p class="subtitle">
+          Tracking US economic recovery against the February 2020 pre-COVID baseline,
+          using four recent activity and labour-market signals from FRED.
+        </p>
+      </header>
+
+      <div id="status" class="status" role="alert"></div>
+
+      <section class="panel hero" aria-labelledby="recovery-heading">
+        <div class="index-summary">
+          <p class="section-label" id="recovery-heading">Recovery Index</p>
+          <p class="index-value" id="index-value">—</p>
+          <p class="index-date" id="index-date">Loading common monthly data…</p>
+          <span class="trend unavailable" id="trend">Calculating trend</span>
+          <p class="trend-note" id="trend-note">
+            Six-month linear direction; not an economic forecast.
+          </p>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="recovery-chart" aria-label="Recovery Index over time"></canvas>
+        </div>
+      </section>
+
+      <div class="section-heading">
+        <h2>Underlying indicators</h2>
+        <p>{{ indicator_count }} signals · latest available observations</p>
+      </div>
+      <section class="cards" id="indicator-cards" aria-label="Economic indicators"></section>
+
+      <p class="method-note">
+        <strong>How to read it:</strong> 100 means the four indicators collectively match
+        February 2020 health. Above 100 indicates stronger baseline-adjusted conditions;
+        below 100 indicates impairment. Lower unemployment and claims increase the score.
+        ICSA remains weekly in its card but enters the composite as a monthly average.
+      </p>
+
+      <footer>
+        <span>Data: Federal Reserve Economic Data (FRED)</span>
+        <span>Live keyless CSV · 12-hour cache · local fallback</span>
+      </footer>
+    </main>
+
+    <script>
+      const charts = [];
+
+      function formatDate(dateString, includeDay = false) {
+        const date = new Date(`${dateString}T00:00:00Z`);
+        return new Intl.DateTimeFormat("en-US", {
+          year: "numeric",
+          month: "short",
+          ...(includeDay ? { day: "numeric" } : {}),
+          timeZone: "UTC",
+        }).format(date);
+      }
+
+      function formatValue(value, seriesId) {
+        if (seriesId === "UNRATE") return `${value.toFixed(1)}%`;
+        if (seriesId === "ICSA") return Math.round(value).toLocaleString("en-US");
+        if (seriesId === "PCEC96") return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
+        return value.toFixed(1);
+      }
+
+      async function fetchJson(path) {
+        const response = await fetch(path);
+        let payload;
+        try {
+          payload = await response.json();
+        } catch (_error) {
+          throw new Error(`The server returned an unreadable response for ${path}.`);
+        }
+        if (!response.ok) {
+          throw new Error(payload.error || payload.detail || `Request failed (${response.status}).`);
+        }
+        return payload;
+      }
+
+      function lineChart(canvas, labels, values, color, label) {
+        const chart = new Chart(canvas, {
+          type: "line",
+          data: {
+            labels,
+            datasets: [{
+              label,
+              data: values,
+              borderColor: color,
+              backgroundColor: `${color}18`,
+              borderWidth: 2,
+              pointRadius: 0,
+              pointHoverRadius: 4,
+              fill: true,
+              tension: 0.22,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: { displayColors: false },
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: { color: "#738196", maxTicksLimit: 7, maxRotation: 0 },
+              },
+              y: {
+                grid: { color: "#edf1f5" },
+                ticks: { color: "#738196", maxTicksLimit: 5 },
+              },
+            },
+          },
+        });
+        charts.push(chart);
+      }
+
+      function renderRecovery(payload) {
+        document.getElementById("index-value").textContent = payload.current.value.toFixed(1);
+        document.getElementById("index-date").textContent = `Latest common month: ${formatDate(payload.current.date)}`;
+
+        const trend = payload.trend;
+        const trendElement = document.getElementById("trend");
+        trendElement.className = `trend ${trend.direction}`;
+        if (typeof trend.slope_per_month === "number") {
+          trendElement.textContent = `${trend.direction[0].toUpperCase()}${trend.direction.slice(1)} · ${trend.slope_per_month >= 0 ? "+" : ""}${trend.slope_per_month.toFixed(2)} / month`;
+          document.getElementById("trend-note").textContent = `Naive next-period extrapolation: ${trend.projected_next_value.toFixed(1)}. Not a forecast.`;
+        } else {
+          trendElement.textContent = "Trend unavailable";
+          document.getElementById("trend-note").textContent = trend.disclaimer;
+        }
+
+        lineChart(
+          document.getElementById("recovery-chart"),
+          payload.series.map((point) => formatDate(point.date)),
+          payload.series.map((point) => point.value),
+          "#2456a6",
+          "Recovery Index",
+        );
+      }
+
+      function renderIndicators(payload) {
+        const cards = document.getElementById("indicator-cards");
+        payload.indicators.forEach((indicator) => {
+          const card = document.createElement("article");
+          card.className = "panel indicator-card";
+          card.innerHTML = `
+            <div class="card-top">
+              <div>
+                <p class="card-category">${indicator.category}</p>
+                <h3>${indicator.label}</h3>
+              </div>
+              <span class="series-id">${indicator.series_id}</span>
+            </div>
+            <div class="metric-row">
+              <div>
+                <p class="metric-value">${formatValue(indicator.latest.value, indicator.series_id)}</p>
+                <p class="metric-meta">${formatDate(indicator.latest.date, indicator.frequency === "weekly")} · ${indicator.unit}</p>
+              </div>
+              <div class="baseline-ratio">
+                <strong>${indicator.percent_of_baseline.toFixed(1)}%</strong>
+                <span>of Feb 2020 raw level</span>
+              </div>
+            </div>
+            <div class="small-chart"><canvas id="chart-${indicator.series_id}"></canvas></div>
+          `;
+          cards.appendChild(card);
+          lineChart(
+            card.querySelector("canvas"),
+            indicator.series.map((point) => formatDate(point.date, indicator.frequency === "weekly")),
+            indicator.series.map((point) => point.value),
+            indicator.color,
+            indicator.label,
+          );
+        });
+      }
+
+      async function loadDashboard() {
+        const status = document.getElementById("status");
+        try {
+          if (typeof Chart === "undefined") {
+            throw new Error("Chart.js could not load. Check your internet connection and refresh.");
+          }
+          // Load sequentially so the first endpoint warms the FRED cache for the second.
+          const indicators = await fetchJson("/api/indicators");
+          const recovery = await fetchJson("/api/recovery-index");
+          renderRecovery(recovery);
+          renderIndicators(indicators);
+        } catch (error) {
+          status.textContent = error.message;
+          status.classList.add("visible");
+          document.getElementById("index-date").textContent = "Data unavailable";
+          console.error(error);
+        }
+      }
+
+      loadDashboard();
+    </script>
+  </body>
+</html>
