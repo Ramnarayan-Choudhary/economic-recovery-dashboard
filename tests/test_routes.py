@@ -11,14 +11,14 @@ from app.main import _fetch_all_series, app
 from tests.test_recovery import sample_series
 
 SAMPLE_DATA_STATUS = {
-    "mode": "live",
+    "mode": "public_csv",
     "loaded_at_utc": "2026-07-16T08:00:00Z",
     "cache_ttl_hours": 12,
     "series_sources": {
-        "UNRATE": "live",
-        "INDPRO": "live",
-        "PCEC96": "live",
-        "ICSA": "live",
+        "UNRATE": "public_csv",
+        "INDPRO": "public_csv",
+        "PCEC96": "public_csv",
+        "ICSA": "public_csv",
     },
 }
 
@@ -51,7 +51,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(indicators.status_code, 200)
         self.assertEqual(len(indicators.json()["indicators"]), 4)
-        self.assertEqual(indicators.json()["data_status"]["mode"], "live")
+        self.assertEqual(indicators.json()["data_status"]["mode"], "public_csv")
         self.assertEqual(recovery.status_code, 200)
         self.assertEqual(recovery.json()["current"]["value"], 157.5)
         self.assertEqual(len(recovery.json()["contributions"]), 4)
@@ -62,7 +62,7 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
         results = [
             SeriesData(
                 observations=samples[config.series_id],
-                source="snapshot" if config.series_id == "ICSA" else "live",
+                source="snapshot" if config.series_id == "ICSA" else "rest_api",
                 loaded_at_utc=f"2026-07-16T08:00:0{index}Z",
             )
             for index, config in enumerate(INDICATORS)

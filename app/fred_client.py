@@ -1,23 +1,25 @@
-"""Keyless FRED CSV client with process-local caching and local fallback."""
+"""FRED client with optional REST authentication and resilient fallbacks."""
 
 from __future__ import annotations
 
 import csv
 import io
 import math
+import os
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
 from app.indicators import CACHE_TTL_SECONDS, OBSERVATION_START
 
+FRED_REST_URL = "https://api.stlouisfed.org/fred/series/observations"
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 DEFAULT_SNAPSHOT_DIR = Path(__file__).resolve().parents[1] / "data"
-SourceMode = Literal["live", "snapshot"]
+SourceMode = Literal["rest_api", "public_csv", "snapshot"]
 
 
 class FredClientError(RuntimeError):
@@ -25,7 +27,7 @@ class FredClientError(RuntimeError):
 
 
 class FredAPIError(FredClientError):
-    """Raised when neither live FRED nor a local snapshot is usable."""
+    """Raised when no configured FRED source or local snapshot is usable."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,11 +54,12 @@ class _CacheEntry:
 
 
 class FredClient:
-    """Fetch public FRED CSV observations and cache them for a bounded period.
+    """Fetch FRED observations and cache them for a bounded period.
 
-    Live downloads require no account or API key. The cache removes repeated external
-    calls during normal use; checked-in CSV snapshots keep the local prototype useful
-    during a temporary FRED/network outage without adding a database dependency.
+    A configured API key enables the official REST endpoint. Without one—or if that
+    request fails—the client uses FRED's public graph CSV download. Checked-in CSV
+    snapshots are the final fallback, keeping the local prototype demonstrable during
+    a network outage without adding a database dependency.
     """
 
     def __init__(
@@ -64,10 +67,14 @@ class FredClient:
         cache_ttl_seconds: int = CACHE_TTL_SECONDS,
         transport: httpx.AsyncBaseTransport | None = None,
         snapshot_dir: Path | None = DEFAULT_SNAPSHOT_DIR,
+        api_key: str | None = None,
     ) -> None:
         self._cache_ttl_seconds = cache_ttl_seconds
         self._transport = transport
         self._snapshot_dir = snapshot_dir
+        configured_key = api_key if api_key is not None else os.getenv("FRED_API_KEY", "")
+        configured_key = configured_key.strip()
+        self._api_key = "" if configured_key == "your_key_here" else configured_key
         self._cache: dict[tuple[str, str], _CacheEntry] = {}
 
     async def fetch_series(
@@ -75,7 +82,7 @@ class FredClient:
         series_id: str,
         observation_start: date = OBSERVATION_START,
     ) -> SeriesData:
-        """Return clean observations, preferring live FRED over a local snapshot."""
+        """Return clean observations using REST → public CSV → snapshot priority."""
 
         cache_key = (series_id, observation_start.isoformat())
         now = time.monotonic()
@@ -83,44 +90,34 @@ class FredClient:
         if cached and cached.expires_at > now:
             return cached.series_data
 
-        params = {
-            "id": series_id,
-            "cosd": observation_start.isoformat(),
-        }
+        observations: list[Observation] = []
+        source: SourceMode = "snapshot"
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            transport=self._transport,
+            follow_redirects=True,
+        ) as client:
+            if self._api_key:
+                observations = await self._fetch_rest(
+                    client, series_id, observation_start
+                )
+                if observations:
+                    source = "rest_api"
 
-        try:
-            async with httpx.AsyncClient(
-                timeout=15.0,
-                transport=self._transport,
-                follow_redirects=True,
-            ) as client:
-                response = await client.get(FRED_CSV_URL, params=params)
-        except httpx.RequestError as exc:
-            observations = self._load_snapshot(series_id)
-            source: SourceMode = "snapshot"
             if not observations:
-                raise FredAPIError(
-                    f"Unable to reach FRED and no local snapshot is available for {series_id}."
-                ) from exc
-        else:
-            if response.is_error:
-                observations = self._load_snapshot(series_id)
-                source = "snapshot"
-                if not observations:
-                    raise FredAPIError(
-                        f"FRED returned HTTP {response.status_code} for {series_id}, "
-                        "and no local snapshot is available."
-                    )
-            else:
-                observations = _parse_csv(response.text, series_id)
-                source = "live"
-                if not observations:
-                    observations = self._load_snapshot(series_id)
-                    source = "snapshot"
+                observations = await self._fetch_public_csv(
+                    client, series_id, observation_start
+                )
+                if observations:
+                    source = "public_csv"
+
+        if not observations:
+            observations = self._load_snapshot(series_id)
+            source = "snapshot"
 
         if not observations:
             raise FredAPIError(
-                f"FRED and the local snapshot returned no usable observations for {series_id}."
+                f"No usable FRED data or local snapshot is available for {series_id}."
             )
 
         series_data = SeriesData(
@@ -138,6 +135,52 @@ class FredClient:
         """Clear cached observations, primarily for tests and manual refreshes."""
 
         self._cache.clear()
+
+    async def _fetch_rest(
+        self,
+        client: httpx.AsyncClient,
+        series_id: str,
+        observation_start: date,
+    ) -> list[Observation]:
+        """Try the authenticated FRED REST API without leaking key-bearing errors."""
+
+        try:
+            response = await client.get(
+                FRED_REST_URL,
+                params={
+                    "series_id": series_id,
+                    "api_key": self._api_key,
+                    "file_type": "json",
+                    "observation_start": observation_start.isoformat(),
+                },
+            )
+            if response.is_error:
+                return []
+            return _parse_rest_json(response.json())
+        except (httpx.RequestError, ValueError):
+            return []
+
+    async def _fetch_public_csv(
+        self,
+        client: httpx.AsyncClient,
+        series_id: str,
+        observation_start: date,
+    ) -> list[Observation]:
+        """Try FRED's keyless graph CSV download."""
+
+        try:
+            response = await client.get(
+                FRED_CSV_URL,
+                params={
+                    "id": series_id,
+                    "cosd": observation_start.isoformat(),
+                },
+            )
+            if response.is_error:
+                return []
+            return _parse_csv(response.text, series_id)
+        except httpx.RequestError:
+            return []
 
     def _load_snapshot(self, series_id: str) -> list[Observation]:
         """Read a downloaded series when the live source is unavailable."""
@@ -171,6 +214,26 @@ def _parse_csv(content: str, series_id: str) -> list[Observation]:
         try:
             observation_date = date.fromisoformat(row["observation_date"])
             value = float(raw_value)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            parsed.append(Observation(date=observation_date, value=value))
+    return parsed
+
+
+def _parse_rest_json(payload: Any) -> list[Observation]:
+    """Parse FRED REST observations, filtering its ``.`` missing marker."""
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("observations"), list):
+        return []
+
+    parsed: list[Observation] = []
+    for item in payload["observations"]:
+        if not isinstance(item, dict) or item.get("value") in (None, "", "."):
+            continue
+        try:
+            observation_date = date.fromisoformat(item["date"])
+            value = float(item["value"])
         except (KeyError, TypeError, ValueError):
             continue
         if math.isfinite(value):

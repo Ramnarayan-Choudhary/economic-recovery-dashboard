@@ -2,7 +2,7 @@
 
 ## 1. What it does
 
-This prototype pulls four United States economic series from FRED's public CSV data service, shows their latest values and history, and combines them into one baseline-relative Recovery Index. The dashboard is a deliberately small end-to-end slice: FastAPI retrieves and transforms real data, JSON endpoints expose the results, and a server-rendered Jinja page uses Chart.js for the visual layer. It needs no login or API key. A 12-hour in-memory cache avoids repeated FRED calls, downloaded snapshots provide an offline fallback, and a clearly labelled six-month linear extrapolation provides a lightweight direction signal rather than a forecast.
+This prototype pulls four United States economic series from FRED, shows their latest values and history, and combines them into one baseline-relative Recovery Index. The dashboard is a deliberately small end-to-end slice: FastAPI retrieves and transforms real data, JSON endpoints expose the results, and a server-rendered Jinja page uses Chart.js for the visual layer. It supports the official FRED REST API when an optional server-side key is configured, while remaining runnable through FRED's public CSV service when no key is available. A 12-hour in-memory cache avoids repeated calls, downloaded snapshots provide an offline fallback, and a clearly labelled six-month linear extrapolation provides a lightweight direction signal rather than a forecast.
 
 ![Economic Recovery Dashboard showing the composite, its drivers, and four indicators](docs/dashboard.png)
 
@@ -11,7 +11,7 @@ This prototype pulls four United States economic series from FRED's public CSV d
 | What the exercise asks for | Where it is delivered |
 |---|---|
 | One country and a coherent handful of indicators | United States; labour, output, consumption, and high-frequency claims |
-| Direct linkage to a public/live source | Keyless FRED CSV downloads on every cache refresh |
+| Direct linkage to a public/live source | Official FRED REST API with a configured key; public FRED CSV otherwise |
 | Recent values and visualisation | Four latest-value cards with native-frequency Chart.js histories |
 | Logic for measuring recovery | Auditable February 2020-normalised, direction-adjusted weighted index |
 | Locally running prototype | FastAPI/Jinja application started with one Uvicorn command |
@@ -30,13 +30,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-No account, API key, or `.env` file is required. Start the application with one command:
+No account, API key, or `.env` file is required for the default public-CSV mode. Start the application with one command:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
 Open [http://localhost:8000](http://localhost:8000). FastAPI's interactive API documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+### Optional official FRED REST mode
+
+If a FRED API key is available, copy the example environment file and add it there:
+
+```bash
+cp .env.example .env
+```
+
+```dotenv
+FRED_API_KEY=your_key_here
+```
+
+Keys can be requested from FRED's [API key page](https://fred.stlouisfed.org/docs/api/api_key.html). Restart Uvicorn after changing `.env`. The key is read only by the Python server, is excluded by `.gitignore`, is never returned by an endpoint, and must not be pasted into the dashboard. It authenticates access to FRED; it does not choose the indicators or calculate relevance. Those decisions remain explicit in `app/indicators.py` so the methodology is reviewable.
 
 The endpoints are:
 
@@ -45,7 +59,13 @@ The endpoints are:
 - `GET /api/recovery-index` — current composite, monthly history, indicator contributions, and the naive trend.
 - `GET /health` — source-independent liveness check returning `{"status": "ok"}`.
 
-On each cache refresh, the application first requests current data from FRED's public CSV endpoint. If FRED or the network is temporarily unavailable, it uses the downloaded files in `data/`. A clear `503` JSON error is returned only if neither source is usable. Both JSON endpoints expose `data_status`, and the dashboard visibly labels the result as live, snapshot, or mixed so fallback data is never presented as live.
+On each cache refresh, the application follows a resilient priority chain:
+
+1. Official FRED REST observations API when `FRED_API_KEY` is configured.
+2. FRED's public graph CSV download when no key exists or the REST request fails.
+3. Downloaded files in `data/` if neither live route is available.
+
+A clear `503` JSON error is returned only if all applicable sources fail. Both JSON endpoints expose `data_status`, and the dashboard labels the result as REST API, public CSV, snapshot, or mixed so fallback data is never presented as live. This provides the API-key workflow requested in the build brief without making the existing keyless demonstration dependent on FRED account access.
 
 ## 3. Country & shock
 
@@ -114,7 +134,8 @@ The February 2020 ICSA baseline is therefore the February calendar-month average
 
 - **One country and four indicators:** enough breadth to tell a coherent recovery story without turning the exercise into a data-platform project.
 - **No database or distributed cache:** live FRED observations are held in a process-local dictionary for 12 hours. Restarting the process clears the memory cache, and multiple workers would have independent caches; both are acceptable for a local prototype.
-- **Downloaded fallback data:** `data/*.csv` keeps the demonstration functional during a FRED/network outage. These snapshots can become stale, so live FRED is always attempted first after the cache expires.
+- **Optional API authentication:** the official FRED REST route is preferred when a key is configured. Public CSV remains a deliberate compatibility path for reviewers who cannot create or use a FRED account; both routes use the same chosen FRED series.
+- **Downloaded fallback data:** `data/*.csv` keeps the demonstration functional during a FRED/network outage. These snapshots can become stale, so configured live FRED routes are always attempted first after the cache expires.
 - **No authentication, Docker, or frontend framework:** these would add setup and code without strengthening the evaluated end-to-end data slice.
 - **Equal weights and fixed baseline:** transparent and easy to audit, but not empirically estimated. The reciprocal lower-is-better formula can become very large as a value approaches zero, though neither selected series is normally near zero.
 - **Latest revised data:** the dashboard asks FRED for the current observation history, not historical data vintages. Results can change when source agencies revise series.
@@ -139,7 +160,7 @@ The normalize → orient direction → weight → aggregate structure follows st
 
 The [OECD/JRC Handbook on Constructing Composite Indicators](https://www.oecd.org/en/publications/handbook-on-constructing-composite-indicators-methodology-and-user-guide_9789264043466-en.html) motivates the explicit theoretical scope, normalisation, weighting, aggregation, and transparent access to underlying components used here. This prototype does not claim the statistical validation expected of a production policy index.
 
-The authenticated [FRED REST observations API](https://fred.stlouisfed.org/docs/api/fred/series_observations.html) requires a registered key. To keep this local exercise runnable without an account, the client uses FRED's public graph CSV downloads instead; for example, [UNRATE as CSV](https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE&cosd=2018-01-01). The same FRED series IDs and current revised observations are used. FRED supplies the data but does not endorse this index or its interpretation.
+The authenticated [FRED REST observations API](https://fred.stlouisfed.org/docs/api/fred/series_observations.html) requires a registered key. The client uses that endpoint when `FRED_API_KEY` is configured and otherwise uses FRED's public graph CSV download; for example, [UNRATE as CSV](https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE&cosd=2018-01-01). The same configured FRED series IDs and current revised observations are used in either mode. FRED supplies the data but does not endorse this index or its interpretation.
 
 ## Project structure
 
@@ -165,6 +186,7 @@ recovery-dashboard/
 │   ├── test_recovery.py
 │   └── test_routes.py
 ├── requirements.txt
+├── .env.example
 ├── .gitignore
 └── README.md
 ```
@@ -177,4 +199,4 @@ The tests use Python's standard-library `unittest` plus `httpx.MockTransport`; n
 python -m unittest discover -s tests -v
 ```
 
-They cover normalization direction, weekly-to-monthly alignment, equal-weight aggregation, native-frequency indicator output, trend calculation, FRED CSV parsing, cache reuse, downloaded-snapshot fallback, source errors, and the HTTP routes.
+They cover normalization direction, weekly-to-monthly alignment, equal-weight aggregation, native-frequency indicator output, trend calculation, authenticated REST parsing, missing-value filtering, REST-to-CSV fallback, cache reuse, downloaded-snapshot fallback, secret-safe source errors, and the HTTP routes.

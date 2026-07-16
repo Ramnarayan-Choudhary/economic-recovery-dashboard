@@ -85,7 +85,8 @@
         font-weight: 750;
       }
 
-      .source-pill.live { background: #e8f6f2; color: var(--positive); }
+      .source-pill.rest_api,
+      .source-pill.public_csv { background: #e8f6f2; color: var(--positive); }
       .source-pill.snapshot,
       .source-pill.mixed { background: #fff3df; color: #9a5a10; }
 
@@ -309,6 +310,30 @@
         line-height: 1.55;
       }
 
+      .connection-info {
+        margin-top: 14px;
+        padding: 15px 18px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--paper);
+        color: #44556a;
+        font-size: 0.82rem;
+        line-height: 1.55;
+      }
+
+      .connection-info summary {
+        color: var(--ink);
+        cursor: pointer;
+        font-weight: 750;
+      }
+
+      .connection-info p { margin: 11px 0 0; }
+      .connection-info code {
+        padding: 2px 5px;
+        border-radius: 4px;
+        background: #edf2f7;
+      }
+
       footer {
         display: flex;
         justify-content: space-between;
@@ -395,9 +420,20 @@
         ICSA remains weekly in its card but enters the composite as a monthly average.
       </p>
 
+      <details class="connection-info" open>
+        <summary>Data connection: <span id="connection-mode">checking…</span></summary>
+        <p>
+          The official FRED REST API is used when <code>FRED_API_KEY</code> is set in
+          the server's <code>.env</code> file. Without a key, the same configured series
+          load automatically from FRED's public CSV service. Downloaded snapshots are
+          the final fallback. The API key stays on the server and is never entered in,
+          or sent to, this browser.
+        </p>
+      </details>
+
       <footer>
         <span>Data: Federal Reserve Economic Data (FRED)</span>
-        <span>Live keyless CSV · 12-hour cache · local fallback</span>
+        <span>REST or public CSV · 12-hour cache · local fallback</span>
       </footer>
     </main>
 
@@ -515,15 +551,18 @@
       function renderDataStatus(status) {
         const source = document.getElementById("data-source");
         const labels = {
-          live: "Live FRED data",
+          rest_api: "Live FRED REST API",
+          public_csv: "Live FRED public CSV",
           snapshot: "Offline snapshot",
-          mixed: "Mixed live / snapshot",
+          mixed: "Mixed data sources",
         };
         source.className = `source-pill ${status.mode}`;
         source.textContent = labels[status.mode] || "Data source unknown";
         source.title = Object.entries(status.series_sources)
           .map(([seriesId, mode]) => `${seriesId}: ${mode}`)
           .join(" · ");
+        document.getElementById("connection-mode").textContent =
+          labels[status.mode] || "unknown";
 
         const loadedAt = new Date(status.loaded_at_utc);
         document.getElementById("data-loaded").textContent =

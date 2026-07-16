@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -16,6 +17,8 @@ from app.recovery import (
     build_indicator_payload,
     build_recovery_payload,
 )
+
+load_dotenv()
 
 app = FastAPI(
     title="US Economic Recovery Dashboard",
