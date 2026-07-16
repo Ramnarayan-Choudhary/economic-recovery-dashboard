@@ -39,6 +39,8 @@ class RouteTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(dashboard.status_code, 200)
         self.assertIn("Economic Recovery Dashboard", dashboard.text)
+        self.assertIn("Data connection", dashboard.text)
+        self.assertIn('label: "Feb 2020 baseline"', dashboard.text)
         self.assertEqual(health.json(), {"status": "ok"})
 
     async def test_data_endpoints_return_expected_contracts(self) -> None:

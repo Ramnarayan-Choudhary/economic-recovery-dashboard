@@ -71,6 +71,7 @@
       .data-meta {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: 10px;
         margin-top: 17px;
         color: var(--muted);
@@ -450,11 +451,12 @@
         }).format(date);
       }
 
-      function formatChartDate(dateString) {
+      function formatChartDate(dateString, includeDay = false) {
         const date = new Date(`${dateString}T00:00:00Z`);
         return new Intl.DateTimeFormat("en-US", {
           year: "2-digit",
           month: "short",
+          ...(includeDay ? { day: "numeric" } : {}),
           timeZone: "UTC",
         }).format(date);
       }
@@ -480,22 +482,36 @@
         return payload;
       }
 
-      function lineChart(canvas, labels, values, color, label) {
+      function lineChart(canvas, labels, values, color, label, baselineValue = null) {
+        const datasets = [{
+          label,
+          data: values,
+          borderColor: color,
+          backgroundColor: `${color}18`,
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          fill: true,
+          tension: 0.22,
+        }];
+        if (typeof baselineValue === "number") {
+          datasets.push({
+            label: "Feb 2020 baseline",
+            data: labels.map(() => baselineValue),
+            borderColor: "#8793a4",
+            borderDash: [6, 5],
+            borderWidth: 1.3,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            fill: false,
+          });
+        }
+
         const chart = new Chart(canvas, {
           type: "line",
           data: {
             labels,
-            datasets: [{
-              label,
-              data: values,
-              borderColor: color,
-              backgroundColor: `${color}18`,
-              borderWidth: 2,
-              pointRadius: 0,
-              pointHoverRadius: 4,
-              fill: true,
-              tension: 0.22,
-            }],
+            datasets,
           },
           options: {
             responsive: true,
@@ -545,6 +561,7 @@
           payload.series.map((point) => point.value),
           "#2456a6",
           "Recovery Index",
+          100,
         );
       }
 
@@ -619,7 +636,9 @@
           cards.appendChild(card);
           lineChart(
             card.querySelector("canvas"),
-            indicator.series.map((point) => formatChartDate(point.date)),
+            indicator.series.map((point) =>
+              formatChartDate(point.date, indicator.frequency === "weekly")
+            ),
             indicator.series.map((point) => point.value),
             indicator.color,
             indicator.label,

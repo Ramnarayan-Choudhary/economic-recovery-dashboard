@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -48,7 +48,7 @@ async def recovery_error_handler(
 
 
 @app.get("/", include_in_schema=False)
-async def dashboard(request: Request):
+async def dashboard(request: Request) -> Response:
     """Render the shell; browser JavaScript loads current JSON data."""
 
     return templates.TemplateResponse(

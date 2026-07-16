@@ -134,6 +134,7 @@ The February 2020 ICSA baseline is therefore the February calendar-month average
 
 - **One country and four indicators:** enough breadth to tell a coherent recovery story without turning the exercise into a data-platform project.
 - **No database or distributed cache:** live FRED observations are held in a process-local dictionary for 12 hours. Restarting the process clears the memory cache, and multiple workers would have independent caches; both are acceptable for a local prototype.
+- **Request-driven refresh:** the first request after the 12-hour TTL fetches current observations; there is no background scheduler. This keeps the prototype small while still updating regularly when used.
 - **Optional API authentication:** the official FRED REST route is preferred when a key is configured. Public CSV remains a deliberate compatibility path for reviewers who cannot create or use a FRED account; both routes use the same chosen FRED series.
 - **Downloaded fallback data:** `data/*.csv` keeps the demonstration functional during a FRED/network outage. These snapshots can become stale, so configured live FRED routes are always attempted first after the cache expires.
 - **No authentication, Docker, or frontend framework:** these would add setup and code without strengthening the evaluated end-to-end data slice.
