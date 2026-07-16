@@ -9,8 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from app.fred_client import FredClient, FredClientError, Observation
-from app.indicators import INDICATORS
+from app.fred_client import FredClient, FredClientError, Observation, SeriesData
+from app.indicators import CACHE_TTL_SECONDS, INDICATORS
 from app.recovery import (
     RecoveryCalculationError,
     build_indicator_payload,
@@ -59,14 +59,16 @@ async def dashboard(request: Request):
 async def indicators() -> dict[str, object]:
     """Return latest, baseline, raw ratio, and native chart series."""
 
-    return build_indicator_payload(await _fetch_all_series())
+    series, data_status = await _fetch_all_series()
+    return {**build_indicator_payload(series), "data_status": data_status}
 
 
 @app.get("/api/recovery-index")
 async def recovery_index() -> dict[str, object]:
     """Return the common-month composite, contributions, and naive trend."""
 
-    return build_recovery_payload(await _fetch_all_series())
+    series, data_status = await _fetch_all_series()
+    return {**build_recovery_payload(series), "data_status": data_status}
 
 
 @app.get("/health")
@@ -76,13 +78,29 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-async def _fetch_all_series() -> dict[str, tuple[Observation, ...]]:
-    """Fetch independent FRED series concurrently; cache absorbs repeat loads."""
+async def _fetch_all_series() -> tuple[
+    dict[str, tuple[Observation, ...]],
+    dict[str, object],
+]:
+    """Fetch series concurrently and expose their source provenance."""
 
-    observations = await asyncio.gather(
+    results: list[SeriesData] = await asyncio.gather(
         *(fred_client.fetch_series(config.series_id) for config in INDICATORS)
     )
-    return {
-        config.series_id: series
-        for config, series in zip(INDICATORS, observations, strict=True)
+    series = {
+        config.series_id: result.observations
+        for config, result in zip(INDICATORS, results, strict=True)
     }
+    source_by_series = {
+        config.series_id: result.source
+        for config, result in zip(INDICATORS, results, strict=True)
+    }
+    sources = set(source_by_series.values())
+    mode = next(iter(sources)) if len(sources) == 1 else "mixed"
+    data_status: dict[str, object] = {
+        "mode": mode,
+        "loaded_at_utc": max(result.loaded_at_utc for result in results),
+        "cache_ttl_hours": CACHE_TTL_SECONDS // 3600,
+        "series_sources": source_by_series,
+    }
+    return series, data_status

@@ -7,8 +7,9 @@ import io
 import math
 import time
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import httpx
 
@@ -16,6 +17,7 @@ from app.indicators import CACHE_TTL_SECONDS, OBSERVATION_START
 
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 DEFAULT_SNAPSHOT_DIR = Path(__file__).resolve().parents[1] / "data"
+SourceMode = Literal["live", "snapshot"]
 
 
 class FredClientError(RuntimeError):
@@ -35,9 +37,18 @@ class Observation:
 
 
 @dataclass(frozen=True, slots=True)
+class SeriesData:
+    """Observations plus enough provenance for users to judge freshness."""
+
+    observations: tuple[Observation, ...]
+    source: SourceMode
+    loaded_at_utc: str
+
+
+@dataclass(frozen=True, slots=True)
 class _CacheEntry:
     expires_at: float
-    observations: tuple[Observation, ...]
+    series_data: SeriesData
 
 
 class FredClient:
@@ -63,14 +74,14 @@ class FredClient:
         self,
         series_id: str,
         observation_start: date = OBSERVATION_START,
-    ) -> tuple[Observation, ...]:
+    ) -> SeriesData:
         """Return clean observations, preferring live FRED over a local snapshot."""
 
         cache_key = (series_id, observation_start.isoformat())
         now = time.monotonic()
         cached = self._cache.get(cache_key)
         if cached and cached.expires_at > now:
-            return cached.observations
+            return cached.series_data
 
         params = {
             "id": series_id,
@@ -86,6 +97,7 @@ class FredClient:
                 response = await client.get(FRED_CSV_URL, params=params)
         except httpx.RequestError as exc:
             observations = self._load_snapshot(series_id)
+            source: SourceMode = "snapshot"
             if not observations:
                 raise FredAPIError(
                     f"Unable to reach FRED and no local snapshot is available for {series_id}."
@@ -93,6 +105,7 @@ class FredClient:
         else:
             if response.is_error:
                 observations = self._load_snapshot(series_id)
+                source = "snapshot"
                 if not observations:
                     raise FredAPIError(
                         f"FRED returned HTTP {response.status_code} for {series_id}, "
@@ -100,20 +113,26 @@ class FredClient:
                     )
             else:
                 observations = _parse_csv(response.text, series_id)
+                source = "live"
                 if not observations:
                     observations = self._load_snapshot(series_id)
+                    source = "snapshot"
 
         if not observations:
             raise FredAPIError(
                 f"FRED and the local snapshot returned no usable observations for {series_id}."
             )
 
-        result = tuple(sorted(observations, key=lambda item: item.date))
+        series_data = SeriesData(
+            observations=tuple(sorted(observations, key=lambda item: item.date)),
+            source=source,
+            loaded_at_utc=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
         self._cache[cache_key] = _CacheEntry(
             expires_at=now + self._cache_ttl_seconds,
-            observations=result,
+            series_data=series_data,
         )
-        return result
+        return series_data
 
     def clear_cache(self) -> None:
         """Clear cached observations, primarily for tests and manual refreshes."""

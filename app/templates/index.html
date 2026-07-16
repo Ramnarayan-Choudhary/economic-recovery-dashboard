@@ -21,6 +21,9 @@
 
       * { box-sizing: border-box; }
 
+      html,
+      body { max-width: 100%; overflow-x: hidden; }
+
       body {
         margin: 0;
         background: var(--canvas);
@@ -30,9 +33,10 @@
       }
 
       .page {
-        width: min(1180px, calc(100% - 32px));
+        width: 100%;
+        max-width: 1212px;
         margin: 0 auto;
-        padding: 52px 0 34px;
+        padding: 52px 16px 34px;
       }
 
       header { margin-bottom: 28px; }
@@ -53,6 +57,7 @@
         font-weight: 760;
         letter-spacing: -0.045em;
         line-height: 1.02;
+        overflow-wrap: break-word;
       }
 
       .subtitle {
@@ -62,6 +67,27 @@
         font-size: 1.05rem;
         line-height: 1.6;
       }
+
+      .data-meta {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 17px;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .source-pill {
+        padding: 6px 9px;
+        border-radius: 999px;
+        background: #eef2f6;
+        color: #536274;
+        font-weight: 750;
+      }
+
+      .source-pill.live { background: #e8f6f2; color: var(--positive); }
+      .source-pill.snapshot,
+      .source-pill.mixed { background: #fff3df; color: #9a5a10; }
 
       .status {
         display: none;
@@ -144,7 +170,13 @@
         line-height: 1.4;
       }
 
-      .chart-wrap { position: relative; min-height: 320px; }
+      .chart-wrap { position: relative; min-width: 0; min-height: 320px; overflow: hidden; }
+      .chart-wrap canvas,
+      .small-chart canvas {
+        display: block;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
 
       .section-heading {
         display: flex;
@@ -185,7 +217,10 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.72rem;
         font-weight: 700;
+        text-decoration: none;
       }
+
+      .series-id:hover { color: var(--accent); }
 
       h3 { margin: 5px 0 0; font-size: 1.08rem; }
 
@@ -216,6 +251,54 @@
       .baseline-ratio strong { display: block; font-size: 1rem; }
       .small-chart { position: relative; height: 150px; }
 
+      .drivers { padding: 6px 22px 10px; overflow-x: auto; }
+
+      .drivers table {
+        width: 100%;
+        min-width: 650px;
+        border-collapse: collapse;
+        font-size: 0.86rem;
+      }
+
+      .drivers th {
+        padding: 13px 10px 10px;
+        color: var(--muted);
+        font-size: 0.69rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-align: right;
+        text-transform: uppercase;
+      }
+
+      .drivers th:first-child,
+      .drivers td:first-child { text-align: left; }
+
+      .drivers td {
+        padding: 14px 10px;
+        border-top: 1px solid var(--line);
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+
+      .driver-name {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-weight: 700;
+      }
+
+      .driver-dot { width: 9px; height: 9px; border-radius: 50%; }
+      .driver-score { font-weight: 780; }
+      .driver-score.above { color: var(--positive); }
+      .driver-score.below { color: var(--negative); }
+
+      .driver-note {
+        margin: 11px 10px 4px;
+        color: var(--muted);
+        font-size: 0.76rem;
+        line-height: 1.5;
+      }
+
       .method-note {
         margin: 20px 0 0;
         padding: 18px 20px;
@@ -239,8 +322,9 @@
 
       @media (max-width: 780px) {
         .page { padding-top: 34px; }
-        .hero { grid-template-columns: 1fr; }
+        .hero { grid-template-columns: minmax(0, 1fr); padding: 20px; }
         .index-summary { min-height: auto; }
+        .chart-wrap { width: 100%; min-height: 260px; }
         .cards { grid-template-columns: 1fr; }
         .section-heading,
         footer { align-items: flex-start; flex-direction: column; }
@@ -256,6 +340,10 @@
           Tracking US economic recovery against the February 2020 pre-COVID baseline,
           using four recent activity and labour-market signals from FRED.
         </p>
+        <div class="data-meta" aria-live="polite">
+          <span class="source-pill" id="data-source">Checking data source…</span>
+          <span id="data-loaded"></span>
+        </div>
       </header>
 
       <div id="status" class="status" role="alert"></div>
@@ -273,6 +361,25 @@
         <div class="chart-wrap">
           <canvas id="recovery-chart" aria-label="Recovery Index over time"></canvas>
         </div>
+      </section>
+
+      <div class="section-heading">
+        <h2>What is driving the index?</h2>
+        <p>Direction-adjusted scores at the latest common month</p>
+      </div>
+      <section class="panel drivers" aria-label="Recovery Index component contributions">
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Adjusted score</th>
+              <th>Weight</th>
+              <th>Index contribution</th>
+            </tr>
+          </thead>
+          <tbody id="driver-rows"></tbody>
+        </table>
+        <p class="driver-note" id="driver-note"></p>
       </section>
 
       <div class="section-heading">
@@ -303,6 +410,15 @@
           year: "numeric",
           month: "short",
           ...(includeDay ? { day: "numeric" } : {}),
+          timeZone: "UTC",
+        }).format(date);
+      }
+
+      function formatChartDate(dateString) {
+        const date = new Date(`${dateString}T00:00:00Z`);
+        return new Intl.DateTimeFormat("en-US", {
+          year: "2-digit",
+          month: "short",
           timeZone: "UTC",
         }).format(date);
       }
@@ -384,13 +500,56 @@
           document.getElementById("trend-note").textContent = trend.disclaimer;
         }
 
+        renderDataStatus(payload.data_status);
+        renderContributions(payload.contributions, payload.current.value);
+
         lineChart(
           document.getElementById("recovery-chart"),
-          payload.series.map((point) => formatDate(point.date)),
+          payload.series.map((point) => formatChartDate(point.date)),
           payload.series.map((point) => point.value),
           "#2456a6",
           "Recovery Index",
         );
+      }
+
+      function renderDataStatus(status) {
+        const source = document.getElementById("data-source");
+        const labels = {
+          live: "Live FRED data",
+          snapshot: "Offline snapshot",
+          mixed: "Mixed live / snapshot",
+        };
+        source.className = `source-pill ${status.mode}`;
+        source.textContent = labels[status.mode] || "Data source unknown";
+        source.title = Object.entries(status.series_sources)
+          .map(([seriesId, mode]) => `${seriesId}: ${mode}`)
+          .join(" · ");
+
+        const loadedAt = new Date(status.loaded_at_utc);
+        document.getElementById("data-loaded").textContent =
+          `Loaded ${loadedAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
+      }
+
+      function renderContributions(contributions, currentIndex) {
+        const rows = document.getElementById("driver-rows");
+        contributions.forEach((component) => {
+          const row = document.createElement("tr");
+          const scoreClass = component.adjusted_score >= 100 ? "above" : "below";
+          row.innerHTML = `
+            <td>
+              <span class="driver-name">
+                <span class="driver-dot" style="background:${component.color}"></span>
+                ${component.label} (${component.series_id})
+              </span>
+            </td>
+            <td class="driver-score ${scoreClass}">${component.adjusted_score.toFixed(1)}</td>
+            <td>${(component.weight * 100).toFixed(0)}%</td>
+            <td>${component.weighted_contribution.toFixed(1)}</td>
+          `;
+          rows.appendChild(row);
+        });
+        document.getElementById("driver-note").textContent =
+          `The four weighted contributions sum to the ${currentIndex.toFixed(1)} Recovery Index. A component score of 100 equals its February 2020 baseline.`;
       }
 
       function renderIndicators(payload) {
@@ -404,7 +563,7 @@
                 <p class="card-category">${indicator.category}</p>
                 <h3>${indicator.label}</h3>
               </div>
-              <span class="series-id">${indicator.series_id}</span>
+              <a class="series-id" href="https://fred.stlouisfed.org/series/${indicator.series_id}" target="_blank" rel="noreferrer" title="Open official FRED series">${indicator.series_id} ↗</a>
             </div>
             <div class="metric-row">
               <div>
@@ -421,7 +580,7 @@
           cards.appendChild(card);
           lineChart(
             card.querySelector("canvas"),
-            indicator.series.map((point) => formatDate(point.date, indicator.frequency === "weekly")),
+            indicator.series.map((point) => formatChartDate(point.date)),
             indicator.series.map((point) => point.value),
             indicator.color,
             indicator.label,

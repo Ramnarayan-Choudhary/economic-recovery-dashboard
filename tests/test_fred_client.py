@@ -37,8 +37,9 @@ class FredClientTests(unittest.IsolatedAsyncioTestCase):
         first = await client.fetch_series("UNRATE")
         second = await client.fetch_series("UNRATE")
 
-        self.assertEqual(len(first), 1)
-        self.assertEqual(first[0].value, 3.5)
+        self.assertEqual(len(first.observations), 1)
+        self.assertEqual(first.observations[0].value, 3.5)
+        self.assertEqual(first.source, "live")
         self.assertIs(first, second)
         self.assertEqual(request_count, 1)
 
@@ -57,10 +58,11 @@ class FredClientTests(unittest.IsolatedAsyncioTestCase):
                 snapshot_dir=snapshot_dir,
             )
 
-            observations = await client.fetch_series("UNRATE")
+            result = await client.fetch_series("UNRATE")
 
-        self.assertEqual(len(observations), 1)
-        self.assertEqual(observations[0].value, 3.5)
+        self.assertEqual(len(result.observations), 1)
+        self.assertEqual(result.observations[0].value, 3.5)
+        self.assertEqual(result.source, "snapshot")
 
     async def test_reports_error_when_live_and_snapshot_sources_fail(self) -> None:
         def handler(_request: httpx.Request) -> httpx.Response:

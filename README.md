@@ -4,6 +4,21 @@
 
 This prototype pulls four United States economic series from FRED's public CSV data service, shows their latest values and history, and combines them into one baseline-relative Recovery Index. The dashboard is a deliberately small end-to-end slice: FastAPI retrieves and transforms real data, JSON endpoints expose the results, and a server-rendered Jinja page uses Chart.js for the visual layer. It needs no login or API key. A 12-hour in-memory cache avoids repeated FRED calls, downloaded snapshots provide an offline fallback, and a clearly labelled six-month linear extrapolation provides a lightweight direction signal rather than a forecast.
 
+![Economic Recovery Dashboard showing the composite, its drivers, and four indicators](docs/dashboard.png)
+
+### Exercise coverage
+
+| What the exercise asks for | Where it is delivered |
+|---|---|
+| One country and a coherent handful of indicators | United States; labour, output, consumption, and high-frequency claims |
+| Direct linkage to a public/live source | Keyless FRED CSV downloads on every cache refresh |
+| Recent values and visualisation | Four latest-value cards with native-frequency Chart.js histories |
+| Logic for measuring recovery | Auditable February 2020-normalised, direction-adjusted weighted index |
+| Locally running prototype | FastAPI/Jinja application started with one Uvicorn command |
+| Decisions and trade-offs | Sections 3–9 below, including frequency alignment and limitations |
+
+The scope is intentionally narrow: it completes the full data → transformation → API → dashboard path within the exercise's 3–4 hour framing instead of presenting a larger unfinished platform.
+
 ## 2. How to run
 
 Python 3.11 or newer is required.
@@ -30,7 +45,7 @@ The endpoints are:
 - `GET /api/recovery-index` — current composite, monthly history, indicator contributions, and the naive trend.
 - `GET /health` — source-independent liveness check returning `{"status": "ok"}`.
 
-On each cache refresh, the application first requests current data from FRED's public CSV endpoint. If FRED or the network is temporarily unavailable, it uses the downloaded files in `data/`. A clear `503` JSON error is returned only if neither source is usable.
+On each cache refresh, the application first requests current data from FRED's public CSV endpoint. If FRED or the network is temporarily unavailable, it uses the downloaded files in `data/`. A clear `503` JSON error is returned only if neither source is usable. Both JSON endpoints expose `data_status`, and the dashboard visibly labels the result as live, snapshot, or mixed so fallback data is never presented as live.
 
 ## 3. Country & shock
 
@@ -44,10 +59,10 @@ The four series cover distinct but complementary parts of the recovery story whi
 
 | FRED series | Category | Frequency | Direction | Why it is included |
 |---|---|---:|---|---|
-| `UNRATE` | Labour market | Monthly | Lower is better | A widely understood measure of labour-market slack and household employment conditions. |
-| `INDPRO` | Economic output | Monthly | Higher is better | A timely measure of real production across manufacturing, mining, and utilities. |
-| `PCEC96` | Consumer activity | Monthly | Higher is better | Real personal consumption captures household demand while removing price-level effects. |
-| `ICSA` | High-frequency labour signal | Weekly | Lower is better | Initial claims respond quickly to layoffs and provide the dashboard's most current stress signal. |
+| [`UNRATE`](https://fred.stlouisfed.org/series/UNRATE) | Labour market | Monthly | Lower is better | Seasonally adjusted U-3 unemployment captures labour-market slack and household employment conditions. |
+| [`INDPRO`](https://fred.stlouisfed.org/series/INDPRO) | Economic output | Monthly | Higher is better | The seasonally adjusted real-output index covers manufacturing, mining, and electric and gas utilities. |
+| [`PCEC96`](https://fred.stlouisfed.org/series/PCEC96) | Consumer activity | Monthly | Higher is better | Real, seasonally adjusted personal consumption captures household demand while removing price-level effects. |
+| [`ICSA`](https://fred.stlouisfed.org/series/ICSA) | High-frequency labour signal | Weekly | Lower is better | Seasonally adjusted initial claims respond quickly to layoffs and provide the most current stress signal. |
 
 Together they cover labour conditions, production, consumer demand, and a weekly turning-point signal. GDP was intentionally not included because its quarterly release frequency would make the common composite less timely.
 
@@ -80,6 +95,8 @@ All four weights are configuration constants in `app/indicators.py` and default 
 - **Above 100** — the mix exceeds the baseline after direction adjustment.
 
 The indicator cards show the **raw** `current / baseline × 100` ratio so the user can see the original series movement. The recovery endpoint separately exposes each direction-adjusted score and weighted contribution, making the composite auditable.
+
+The dashboard also renders those scores and contributions in a driver table. This is important because a composite can hide offsetting movements—for example, stronger consumption can coexist with weaker unemployment performance even when the headline index is near 100.
 
 The optional trend uses `numpy.polyfit(..., degree=1)` over the last six common monthly index points. Its slope labels the index as improving, declining, or stable and extrapolates one period. It is explicitly a naive linear extrapolation—not a forecast or policy recommendation.
 
@@ -120,6 +137,8 @@ The baseline-relative framing is inspired by real-time trackers that compare obs
 
 The normalize → orient direction → weight → aggregate structure follows standard composite-index practice and is conceptually similar to the [COVID Economic Recovery Index methodology](https://www.covidrecoveryindex.org/methodology). The reference motivates a composite recovery view; this dashboard does not reproduce its much broader country-resilience model.
 
+The [OECD/JRC Handbook on Constructing Composite Indicators](https://www.oecd.org/en/publications/handbook-on-constructing-composite-indicators-methodology-and-user-guide_9789264043466-en.html) motivates the explicit theoretical scope, normalisation, weighting, aggregation, and transparent access to underlying components used here. This prototype does not claim the statistical validation expected of a production policy index.
+
 The authenticated [FRED REST observations API](https://fred.stlouisfed.org/docs/api/fred/series_observations.html) requires a registered key. To keep this local exercise runnable without an account, the client uses FRED's public graph CSV downloads instead; for example, [UNRATE as CSV](https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE&cosd=2018-01-01). The same FRED series IDs and current revised observations are used. FRED supplies the data but does not endorse this index or its interpretation.
 
 ## Project structure
@@ -139,6 +158,8 @@ recovery-dashboard/
 │   ├── INDPRO.csv
 │   ├── PCEC96.csv
 │   └── ICSA.csv
+├── docs/
+│   └── dashboard.png
 ├── tests/
 │   ├── test_fred_client.py
 │   ├── test_recovery.py

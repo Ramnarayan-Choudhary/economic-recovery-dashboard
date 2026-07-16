@@ -255,6 +255,7 @@ def _contribution_payload(
     return {
         "series_id": config.series_id,
         "label": config.label,
+        "color": config.color,
         "direction": config.direction,
         "weight": _rounded(normalized_weight),
         "current_month_value": _rounded(current),
